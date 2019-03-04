@@ -8,11 +8,20 @@ import numpy as np
 import pandas as pd
 import os
 import random
-from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from zipfile import ZipFile
 from PIL import Image
-from io import StringIO
+from tensorflow.keras.layers import Dense, Conv2D, BatchNormalization, Activation
+from tensorflow.keras.layers import AveragePooling2D, Input, Flatten
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import ModelCheckpoint, LearningRateScheduler
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras import backend as K
+from tensorflow.keras.models import Model
+from tensorflow import keras
+from tensorflow.keras.utils import to_categorical   
 
 #Image information: all images are 96x96 color images with 3 channels (r,g,b)
 data = pd.read_csv('/home/patrick/Documents/data/histopath_cancer/train_labels.csv')
@@ -50,28 +59,17 @@ train_labels = np.asarray(train_df['label'].values)
 X_train, X_valid, y_train, y_valid = train_test_split(train_names, train_labels, test_size=0.1, random_state=42)
 
 
-#A positive label is called if the center 32x32 pixels have at least one cancer polyp.
-#Cropping surely reduces the problem, but additional information from outside the crop zone is lost
-#All of this has to be taken into consideration. The crop size can thus be varied.
-
-from tensorflow.keras.layers import Dense, Conv2D, BatchNormalization, Activation
-from tensorflow.keras.layers import AveragePooling2D, Input, Flatten
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import ModelCheckpoint, LearningRateScheduler
-from tensorflow.keras.callbacks import ReduceLROnPlateau
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras import backend as K
-from tensorflow.keras.models import Model
-#from tensorflow.keras.datasets import cifar10
-import numpy as np
-import os
+#Create onehot encoding for labels
+y_train = to_categorical(y_train, num_classes=2)
+y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
 batch_size = 32  # orig paper trained all networks with batch_size=128
 epochs = 200
-data_augmentation = True
-num_classes = 10
+data_augmentation = True #Check exactly what kind of augmentation is performed
+						 #Rotation and differential cropping ma be useful for making the
+						 #network robust
+num_classes = 2
 
 
 #Parameters
@@ -125,7 +123,7 @@ def resnet_layer(inputs,
 
 
 
-def resnet_v1(input_shape, depth, num_classes=10):
+def resnet_v1(input_shape, depth, num_classes=2):
     """ResNet Version 1 Model builder [a]
 
     Stacks of 2 x (3 x 3) Conv2D-BN-ReLU
@@ -134,7 +132,7 @@ def resnet_v1(input_shape, depth, num_classes=10):
     by a convolutional layer with strides=2, while the number of filters is
     doubled. Within each stage, the layers have the same number filters and the
     same number of filters.
-    Features maps sizes:
+    Features maps sizes: (if 32x32 images and 16 filters)
     stage 0: 32x32, 16
     stage 1: 16x16, 32
     stage 2:  8x8,  64
@@ -148,7 +146,7 @@ def resnet_v1(input_shape, depth, num_classes=10):
     # Arguments
         input_shape (tensor): shape of input image tensor
         depth (int): number of core convolutional layers
-        num_classes (int): number of classes (CIFAR10 has 10)
+        num_classes (int): number of classes 
 
     # Returns
         model (Model): Keras model instance
@@ -204,11 +202,10 @@ def resnet_v1(input_shape, depth, num_classes=10):
 #################
 
 #Get train and valid data
-size = 48
-def crop_image(img_array, size):
-	'''A function that crops the image towards its center according to
-	the specified size.
-	'''
+img_size = 96
+crop_size = 48
+start_crop = (img_size - crop_size)//2
+end_crop = start_crop + crop_size
 
 
 def images_to_arrays(names, directory):
@@ -217,23 +214,26 @@ def images_to_arrays(names, directory):
 	'''
 	data_list = []
 	for name in names:
+		#Get image as array
 		img_array = get_data(name+'.tif', train_zip)
-		img_array = crop_image(img_array)
+		#Crop image
+		#A positive label is called if the center 32x32 pixels have at least one cancer polyp.
+		#Cropping surely reduces the problem, but additional information from outside the crop zone is lost
+		#All of this has to be taken into consideration. The crop size can thus be varied.
+
+
+		img_array = img_array[start_crop:end_crop, start_crop:end_crop]
 		data_list.append(img_array)
 
 	return np.array(data_list)
 
-X_train = images_to_arrays(X_train[0:10], train_zip)
-pdb.set_trace()
+X_train = images_to_arrays(X_train, train_zip)
 X_valid = images_to_arrays(X_valid, train_zip)
 
-pdb.set_trace()
-#Crop data
-#x_train = 
-#Get model
+
 depth = 20
 # Input image dimensions.
-#input_shape = x_train.shape[1:]
+input_shape = X_train.shape[1:]
 model = resnet_v1(input_shape=input_shape, depth=depth)
 
 model.compile(loss='categorical_crossentropy',
@@ -249,14 +249,26 @@ model.summary()
 
 
 
-model.fit(x_train, y_train,
+model.fit(X_train, y_train,
               batch_size=batch_size,
-              epochs=3,
-              validation_data=(x_test, y_test),
+              epochs=1,
+              validation_data=(X_valid, y_valid),
               shuffle=True)
 
 
 # Score trained model.
-scores = model.evaluate(x_test, y_test, verbose=1)
-print('Test loss:', scores[0])
-print('Test accuracy:', scores[1])
+#scores = model.evaluate(x_test, y_test, verbose=1)
+#print('Test loss:', scores[0])
+#print('Test accuracy:', scores[1])
+
+
+#Save model to disk
+from tensorflow.keras.models import model_from_json   
+# serialize model to JSON
+model_json = model.to_json()
+with open("model.json", "w") as json_file:
+    json_file.write(model_json)
+
+# serialize weights to HDF5
+model.save_weights("model.h5")
+print("Saved model to disk")

@@ -98,8 +98,8 @@ y_train = to_categorical(y_train, num_classes=2)
 y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
-batch_size = 64  # orig paper trained all networks with batch_size=128
-epochs = 100
+batch_size = 128  # orig paper trained all networks with batch_size=128
+epochs = 10
 num_classes = 2
 
 
@@ -230,7 +230,7 @@ def resnet_v1(input_shape, depth, num_classes=2):
 
 
 #Crop parameters
-img_size = 96
+img_size = 96 #Don't change
 crop_size = 48
 start_crop = (img_size - crop_size)//2
 end_crop = start_crop + crop_size
@@ -257,21 +257,24 @@ def images_to_arrays(names, directory):
 
 
 X_train = images_to_arrays(X_train, train_zip)
+X_train = X_train/255 #rescaling by 255 (make pixel intensities into 0 to 1 range)
 X_valid = images_to_arrays(X_valid, train_zip)
+X_valid = X_valid/255 #Rescale
 
 #Keras datagenerator, performs augmentation
 #random rotation by 90 deg
 #random horizontal and vertical flips
 #rescaling by 255 (make pixel intensities into 0 to 1 range)
-datagen = ImageDataGenerator(rotation_range = 90, horizontal_flip = True, 
-                              vertical_flip = True, rescale = 1.0/255,  
-                              zoom_range = 32.0, brightness_range = [0.0,10.0])
+datagen = ImageDataGenerator(rotation_range = 90, horizontal_flip = True) 
+                              #vertical_flip = False)  
+                              #zoom_range = 32.0)
+                              #brightness_range = [0.0,10.0])
                               #zca_whitening = True)
 
 datagen.fit(X_train)
 
 
-depth = 26 #6n+2, where n is the number of resnet layers
+depth = 20 #6n+2, where n is the number of resnet layers
 # Input image dimensions.
 input_shape = X_train.shape[1:]
 model = resnet_v1(input_shape=input_shape, depth=depth)
@@ -311,6 +314,9 @@ def lr_schedule(epoch):
 # lr scheduler
 lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
 
+#Checkpoint
+filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
+checkpoint = ModelCheckpoint(filepath, monitor='val_acc', verbose=1, save_best_only=True, mode='max')
 
 
 # fits the model on batches with real-time data augmentation:
@@ -319,17 +325,17 @@ model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
               epochs=epochs,
               validation_data=(X_valid, y_valid),
               shuffle=True, #Dont feed continuously
-              callbacks=[tensorboard, lr_scheduler])
+              callbacks=[tensorboard, checkpoint]) #, lr_scheduler])
 
 
 
 #Save model to disk
 from tensorflow.keras.models import model_from_json   
-# serialize model to JSON
+#serialize model to JSON
 model_json = model.to_json()
 with open("./models/model."+log_name+".json", "w") as json_file:
     json_file.write(model_json)
 
 # serialize weights to HDF5
-model.save_weights("./models/model."+log_name+".h5")
+#model.save_weights("./models/model."+log_name+".h5")
 print("Saved model to disk")

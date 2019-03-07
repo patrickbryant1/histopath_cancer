@@ -275,6 +275,7 @@ def augmentation(img_array):
 X_train = images_to_arrays(X_train, train_zip)
 X_valid = images_to_arrays(X_valid, train_zip)
 
+datagen = ImageDataGenerator(rotation_range = 90, )
 
 depth = 20 #6n+2
 # Input image dimensions.
@@ -298,7 +299,8 @@ model.fit(X_train, y_train,
               batch_size=batch_size,
               epochs=epochs,
               validation_data=(X_valid, y_valid),
-              shuffle=True)
+              shuffle=True,
+              callbacks=[tensorboard])
 
 
 

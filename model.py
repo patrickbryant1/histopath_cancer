@@ -1,8 +1,6 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-
-
 import pdb
 import numpy as np
 import pandas as pd
@@ -22,11 +20,32 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model
 from tensorflow import keras
 from tensorflow.keras.utils import to_categorical   
+from tensorflow.keras.callbacks import tensorboard
+import time
 
+import argparse
+import sys
+
+
+#Arguments for argparse module:
+parser = argparse.ArgumentParser(description = '''A program that reads a keras model from a .json and a .h5 file''')
+ 
+parser.add_argument('train_labels', nargs=1, type= str,
+                  default=sys.stdin, help = 'path to train_labels.csv file.')
+
+parser.add_argument('train_path', nargs=1, type= str,
+                  default=sys.stdin, help = '''path to train.zip.''')
+
+parser.add_argument('test_path', nargs=1, type= str,
+                  default=sys.stdin, help = '''path to test.zip.''')
+
+args = parser.parse_args()
+
+#Inputs
 #Image information: all images are 96x96 color images with 3 channels (r,g,b)
-data = pd.read_csv('/home/patrick/Documents/data/histopath_cancer/train_labels.csv')
-train_path = '/home/patrick/Documents/data/histopath_cancer/train.zip'
-test_path = '/home/patrick/Documents/data/histopath_cancer/test.zip'
+data = pd.read_csv(args.train_labels[0])
+train_path = args.train_path[0] #'/home/pbryant/data/histopath_cancer/train.zip'
+test_path = args.test_path[0] #'/home/pbryant/data/histopath_cancer/test.zip'
 
 # quick look at the label stats
 def get_counts(data):
@@ -58,6 +77,10 @@ train_labels = np.asarray(train_df['label'].values)
 #Split train data to use 90% for training and 10% for validation. 
 X_train, X_valid, y_train, y_valid = train_test_split(train_names, train_labels, test_size=0.1, random_state=42)
 
+#print('train')
+#get_counts(y_train)
+#print('valid')
+#get_counts(y_valid)
 
 #Create onehot encoding for labels
 y_train = to_categorical(y_train, num_classes=2)
@@ -201,12 +224,14 @@ def resnet_v1(input_shape, depth, num_classes=2):
 #MAIN
 #################
 
-#Get train and valid data
+
+#Crop parameters
 img_size = 96
 crop_size = 48
 start_crop = (img_size - crop_size)//2
 end_crop = start_crop + crop_size
 
+#Get train and valid data
 
 def images_to_arrays(names, directory):
 	'''A function that fetches all the images, converts them to numpy arrays
@@ -215,7 +240,7 @@ def images_to_arrays(names, directory):
 	data_list = []
 	for name in names:
 		#Get image as array
-		img_array = get_data(name+'.tif', train_zip)
+		img_array = get_data(name+'.tif', directory)
 		#Crop image
 		#A positive label is called if the center 32x32 pixels have at least one cancer polyp.
 		#Cropping surely reduces the problem, but additional information from outside the crop zone is lost
@@ -246,12 +271,13 @@ model.summary()
 # lr scheduler
 #lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
 
-
+#Tensorboard fro logging and visualization
+tensorboard = Tensorboard(log_dir='/home/pbryant/Documents/histopath_cancer/logs/'+str(time.time()))
 
 
 model.fit(X_train, y_train,
               batch_size=batch_size,
-              epochs=1,
+              epochs=10,
               validation_data=(X_valid, y_valid),
               shuffle=True)
 
@@ -266,9 +292,9 @@ model.fit(X_train, y_train,
 from tensorflow.keras.models import model_from_json   
 # serialize model to JSON
 model_json = model.to_json()
-with open("model.json", "w") as json_file:
+with open("model.json"+str(time.time()), "w") as json_file:
     json_file.write(model_json)
 
 # serialize weights to HDF5
-model.save_weights("model.h5")
+model.save_weights("model.h5"+str(time.time()))
 print("Saved model to disk")

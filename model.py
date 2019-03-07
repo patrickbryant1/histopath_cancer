@@ -20,7 +20,7 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model
 from tensorflow import keras
 from tensorflow.keras.utils import to_categorical   
-from tensorflow.keras.callbacks import tensorboard
+import tensorboard
 import time
 
 import argparse
@@ -39,6 +39,9 @@ parser.add_argument('train_path', nargs=1, type= str,
 parser.add_argument('test_path', nargs=1, type= str,
                   default=sys.stdin, help = '''path to test.zip.''')
 
+parser.add_argument('log_path', nargs=1, type= str,
+                  default=sys.stdin, help = '''path to atore log files for tensorboard.''')
+
 args = parser.parse_args()
 
 #Inputs
@@ -46,12 +49,10 @@ args = parser.parse_args()
 data = pd.read_csv(args.train_labels[0])
 train_path = args.train_path[0] #'/home/pbryant/data/histopath_cancer/train.zip'
 test_path = args.test_path[0] #'/home/pbryant/data/histopath_cancer/test.zip'
-
+log_path = args.log_path[0] #'/home/pbryant/Documents/histopath_cancer/logs/'
 # quick look at the label stats
-def get_counts(data):
-	print(data['label'].value_counts())
+print(data['label'].value_counts())
 
-get_counts(data)
 
 def get_data(filename, archive):
 	'''A function for getting the .zip .tif images
@@ -77,27 +78,30 @@ train_labels = np.asarray(train_df['label'].values)
 #Split train data to use 90% for training and 10% for validation. 
 X_train, X_valid, y_train, y_valid = train_test_split(train_names, train_labels, test_size=0.1, random_state=42)
 
-#print('train')
-#get_counts(y_train)
-#print('valid')
-#get_counts(y_valid)
+def split_stats(name, y):
+	'''print the split stats
+	'''
+	print(name+':')
+	unique, counts = np.unique(y, return_counts=True)
+	print(dict(zip(unique, counts)))
+	print('0 frequency'+counts[0]/(counts[0]+counts[1])) #print frequency of 0
+
+
+split_stats('train', y_train)
+split_stats('valid', y_valid)
 
 #Create onehot encoding for labels
 y_train = to_categorical(y_train, num_classes=2)
 y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
-batch_size = 32  # orig paper trained all networks with batch_size=128
-epochs = 200
+batch_size = 128  # orig paper trained all networks with batch_size=128
+epochs = 100
 data_augmentation = True #Check exactly what kind of augmentation is performed
 						 #Rotation and differential cropping ma be useful for making the
 						 #network robust
 num_classes = 2
 
-
-#Parameters
-train_size = 60000
-test_size = 10000
 
 
 def resnet_layer(inputs,
@@ -227,7 +231,7 @@ def resnet_v1(input_shape, depth, num_classes=2):
 
 #Crop parameters
 img_size = 96
-crop_size = 48
+crop_size = 64
 start_crop = (img_size - crop_size)//2
 end_crop = start_crop + crop_size
 
@@ -246,17 +250,23 @@ def images_to_arrays(names, directory):
 		#Cropping surely reduces the problem, but additional information from outside the crop zone is lost
 		#All of this has to be taken into consideration. The crop size can thus be varied.
 
-
 		img_array = img_array[start_crop:end_crop, start_crop:end_crop]
 		data_list.append(img_array)
 
 	return np.array(data_list)
 
+#def augmentation(img_array):
+	'''Perform data augmentation
+	'''
+	#Normalize pixel values to 0-1 range. Max pixel val = 255
+
+
+
 X_train = images_to_arrays(X_train, train_zip)
 X_valid = images_to_arrays(X_valid, train_zip)
 
 
-depth = 20
+depth = 20 #6n+2
 # Input image dimensions.
 input_shape = X_train.shape[1:]
 model = resnet_v1(input_shape=input_shape, depth=depth)
@@ -272,20 +282,15 @@ model.summary()
 #lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
 
 #Tensorboard fro logging and visualization
-tensorboard = Tensorboard(log_dir='/home/pbryant/Documents/histopath_cancer/logs/'+str(time.time()))
+tensorboard = Tensorboard(log_dir=log_path+str(time.time()))
 
 
 model.fit(X_train, y_train,
               batch_size=batch_size,
-              epochs=10,
+              epochs=epochs,
               validation_data=(X_valid, y_valid),
               shuffle=True)
 
-
-# Score trained model.
-#scores = model.evaluate(x_test, y_test, verbose=1)
-#print('Test loss:', scores[0])
-#print('Test accuracy:', scores[1])
 
 
 #Save model to disk

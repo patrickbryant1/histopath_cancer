@@ -99,7 +99,7 @@ y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
 batch_size = 128  # orig paper trained all networks with batch_size=128
-epochs = 10
+epochs = 15
 num_classes = 2
 
 

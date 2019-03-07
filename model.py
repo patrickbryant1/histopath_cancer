@@ -231,7 +231,7 @@ def resnet_v1(input_shape, depth, num_classes=2):
 
 #Crop parameters
 img_size = 96
-crop_size = 64
+crop_size = 48
 start_crop = (img_size - crop_size)//2
 end_crop = start_crop + crop_size
 
@@ -283,9 +283,33 @@ model.compile(loss='categorical_crossentropy',
 #Write summary of model
 model.summary()
 
+#lr schedule
+def lr_schedule(epoch):
+    """Learning Rate Schedule
+
+    Learning rate is scheduled to be reduced after 80, 120, 160, 180 epochs.
+    Called automatically every epoch as part of callbacks during training.
+
+    # Arguments
+        epoch (int): The number of epochs
+
+    # Returns
+        lr (float32): learning rate
+    """
+    lr = 1e-3
+    if epoch > ((epochs/10)*9.5):
+        lr *= 0.5e-3
+    elif epoch > ((epochs/10)*9):
+        lr *= 1e-3
+    elif epoch > ((epochs/10)*7):
+        lr *= 1e-2
+    elif epoch > ((epochs/10)*5):
+        lr *= 1e-1
+    print('Learning rate: ', lr)
+    return lr
 
 # lr scheduler
-#lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
+lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
 
 
 
@@ -295,7 +319,7 @@ model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
               epochs=epochs,
               validation_data=(X_valid, y_valid),
               shuffle=True, #Dont feed continuously
-              callbacks=[tensorboard])
+              callbacks=[tensorboard, lr_scheduler])
 
 
 

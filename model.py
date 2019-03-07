@@ -20,7 +20,7 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model
 from tensorflow import keras
 from tensorflow.keras.utils import to_categorical   
-import tensorboard
+from tensorflow.keras.callbacks import TensorBoard
 import time
 
 import argparse
@@ -53,6 +53,8 @@ log_path = args.log_path[0] #'/home/pbryant/Documents/histopath_cancer/logs/'
 # quick look at the label stats
 print(data['label'].value_counts())
 
+#Tensorboard for logging and visualization
+tensorboard = TensorBoard(log_dir=log_path+str(time.time()))
 
 def get_data(filename, archive):
 	'''A function for getting the .zip .tif images
@@ -84,7 +86,7 @@ def split_stats(name, y):
 	print(name+':')
 	unique, counts = np.unique(y, return_counts=True)
 	print(dict(zip(unique, counts)))
-	print('0 frequency'+counts[0]/(counts[0]+counts[1])) #print frequency of 0
+	print(counts[0]/(counts[0]+counts[1])) #print frequency of 0
 
 
 split_stats('train', y_train)
@@ -250,17 +252,25 @@ def images_to_arrays(names, directory):
 		#Cropping surely reduces the problem, but additional information from outside the crop zone is lost
 		#All of this has to be taken into consideration. The crop size can thus be varied.
 
-		img_array = img_array[start_crop:end_crop, start_crop:end_crop]
+		img_array = augmentation(img_array)
 		data_list.append(img_array)
 
 	return np.array(data_list)
 
-#def augmentation(img_array):
-	'''Perform data augmentation
+def augmentation(img_array):
+	'''Perform data augmentation to increase robustness. This should be done before feeding each
+	image. Not only while reading.
 	'''
-	#Normalize pixel values to 0-1 range. Max pixel val = 255
+	#Rotate image by 90 deg randomly
+	img_array = np.rot90(img_array, random.randint(1,4))
+	#Crop image
+	img_array = img_array[start_crop:end_crop, start_crop:end_crop]
+	img_array = img_array/255 #Normalize pixel values to 0-1 range. Max pixel val = 255
+	
+	#Random flip
+	img_array = np.flip(img_array, random.randint(0,1))
 
-
+	return img_array
 
 X_train = images_to_arrays(X_train, train_zip)
 X_valid = images_to_arrays(X_valid, train_zip)
@@ -281,8 +291,7 @@ model.summary()
 # lr scheduler
 #lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
 
-#Tensorboard fro logging and visualization
-tensorboard = Tensorboard(log_dir=log_path+str(time.time()))
+
 
 
 model.fit(X_train, y_train,

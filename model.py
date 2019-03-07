@@ -54,7 +54,8 @@ log_path = args.log_path[0] #'/home/pbryant/Documents/histopath_cancer/logs/'
 print(data['label'].value_counts())
 
 #Tensorboard for logging and visualization
-tensorboard = TensorBoard(log_dir=log_path+str(time.time()))
+log_name = str(time.time())
+tensorboard = TensorBoard(log_dir=log_path+log_name)
 
 def get_data(filename, archive):
 	'''A function for getting the .zip .tif images
@@ -97,11 +98,8 @@ y_train = to_categorical(y_train, num_classes=2)
 y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
-batch_size = 128  # orig paper trained all networks with batch_size=128
+batch_size = 64  # orig paper trained all networks with batch_size=128
 epochs = 100
-data_augmentation = True #Check exactly what kind of augmentation is performed
-						 #Rotation and differential cropping ma be useful for making the
-						 #network robust
 num_classes = 2
 
 
@@ -240,44 +238,40 @@ end_crop = start_crop + crop_size
 #Get train and valid data
 
 def images_to_arrays(names, directory):
-	'''A function that fetches all the images, converts them to numpy arrays
-	and returns them as one whole numpy array
-	'''
-	data_list = []
-	for name in names:
-		#Get image as array
-		img_array = get_data(name+'.tif', directory)
-		#Crop image
-		#A positive label is called if the center 32x32 pixels have at least one cancer polyp.
-		#Cropping surely reduces the problem, but additional information from outside the crop zone is lost
-		#All of this has to be taken into consideration. The crop size can thus be varied.
+    '''A function that fetches all the images, converts them to numpy arrays
+    and returns them as one whole numpy array
+    '''
 
-		img_array = augmentation(img_array)
-		data_list.append(img_array)
+    data_list = []
+    for name in names:
+            #Get image as array
+            img_array = get_data(name+'.tif', directory)
+            #Crop image
+	    #A positive label is called if the center 32x32 pixels have at least one cancer polyp.
+	    #Cropping surely reduces the problem, but additional information from outside the crop zone is lost
+	    #All of this has to be taken into consideration. The crop size can thus be varied.
+            img_array = img_array[start_crop:end_crop, start_crop:end_crop]
+            data_list.append(img_array)
 
-	return np.array(data_list)
+    return np.array(data_list)
 
-def augmentation(img_array):
-	'''Perform data augmentation to increase robustness. This should be done before feeding each
-	image. Not only while reading.
-	'''
-	#Rotate image by 90 deg randomly
-	img_array = np.rot90(img_array, random.randint(1,4))
-	#Crop image
-	img_array = img_array[start_crop:end_crop, start_crop:end_crop]
-	img_array = img_array/255 #Normalize pixel values to 0-1 range. Max pixel val = 255
-	
-	#Random flip
-	img_array = np.flip(img_array, random.randint(0,1))
-
-	return img_array
 
 X_train = images_to_arrays(X_train, train_zip)
 X_valid = images_to_arrays(X_valid, train_zip)
 
-datagen = ImageDataGenerator(rotation_range = 90, )
+#Keras datagenerator, performs augmentation
+#random rotation by 90 deg
+#random horizontal and vertical flips
+#rescaling by 255 (make pixel intensities into 0 to 1 range)
+datagen = ImageDataGenerator(rotation_range = 90, horizontal_flip = True, 
+                              vertical_flip = True, rescale = 1.0/255,  
+                              zoom_range = 32.0, brightness_range = [0.0,10.0])
+                              #zca_whitening = True)
 
-depth = 20 #6n+2
+datagen.fit(X_train)
+
+
+depth = 26 #6n+2, where n is the number of resnet layers
 # Input image dimensions.
 input_shape = X_train.shape[1:]
 model = resnet_v1(input_shape=input_shape, depth=depth)
@@ -286,6 +280,7 @@ model.compile(loss='categorical_crossentropy',
               optimizer='adam',
               metrics=['accuracy'])
 
+#Write summary of model
 model.summary()
 
 
@@ -294,12 +289,12 @@ model.summary()
 
 
 
-
-model.fit(X_train, y_train,
-              batch_size=batch_size,
+# fits the model on batches with real-time data augmentation:
+model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
+              steps_per_epoch=len(X_train) / batch_size,
               epochs=epochs,
               validation_data=(X_valid, y_valid),
-              shuffle=True,
+              shuffle=True, #Dont feed continuously
               callbacks=[tensorboard])
 
 
@@ -308,9 +303,9 @@ model.fit(X_train, y_train,
 from tensorflow.keras.models import model_from_json   
 # serialize model to JSON
 model_json = model.to_json()
-with open("model.json"+str(time.time()), "w") as json_file:
+with open("./models/model."+log_name+".json", "w") as json_file:
     json_file.write(model_json)
 
 # serialize weights to HDF5
-model.save_weights("model.h5"+str(time.time()))
+model.save_weights("./models/model."+log_name+".h5")
 print("Saved model to disk")

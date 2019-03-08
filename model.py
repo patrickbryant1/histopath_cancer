@@ -99,7 +99,7 @@ y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
 batch_size = 128  # orig paper trained all networks with batch_size=128
-epochs = 15
+epochs = 100
 num_classes = 2
 
 
@@ -255,7 +255,7 @@ def images_to_arrays(names, directory):
 
     return np.array(data_list)
 
-
+pdb.set_trace()
 X_train = images_to_arrays(X_train, train_zip)
 X_train = X_train/255 #rescaling by 255 (make pixel intensities into 0 to 1 range)
 X_valid = images_to_arrays(X_valid, train_zip)

@@ -9,8 +9,9 @@ import random
 from sklearn.model_selection import train_test_split
 from zipfile import ZipFile
 from PIL import Image
+from tensorflow.keras.applications.resnet50 import ResNet50
 from tensorflow.keras.layers import Dense, Conv2D, BatchNormalization, Activation
-from tensorflow.keras.layers import AveragePooling2D, Input, Flatten
+from tensorflow.keras.layers import GlobalAveragePooling2D, Input, Flatten
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, LearningRateScheduler
 from tensorflow.keras.callbacks import ReduceLROnPlateau
@@ -40,9 +41,12 @@ parser.add_argument('test_path', nargs=1, type= str,
                   default=sys.stdin, help = '''path to test.zip.''')
 
 parser.add_argument('log_path', nargs=1, type= str,
-                  default=sys.stdin, help = '''path to atore log files for tensorboard.''')
+                  default=sys.stdin, help = '''path to store log files for tensorboard.''')
+
 
 args = parser.parse_args()
+
+
 
 #Inputs
 #Image information: all images are 96x96 color images with 3 channels (r,g,b)
@@ -98,130 +102,9 @@ y_train = to_categorical(y_train, num_classes=2)
 y_valid = to_categorical(y_valid, num_classes=2)
 
 # Training parameters
-batch_size = 128  # orig paper trained all networks with batch_size=128
-epochs = 100
+batch_size = 64  # orig paper trained all networks with batch_size=128
+epochs = 10
 num_classes = 2
-
-
-
-def resnet_layer(inputs,
-                 num_filters=16,
-                 kernel_size=3,
-                 strides=1,
-                 activation='relu',
-                 batch_normalization=True,
-                 conv_first=True):
-    """2D Convolution-Batch Normalization-Activation stack builder
-
-    # Arguments
-        inputs (tensor): input tensor from input image or previous layer
-        num_filters (int): Conv2D number of filters
-        kernel_size (int): Conv2D square kernel dimensions
-        strides (int): Conv2D square stride dimensions
-        activation (string): activation name
-        batch_normalization (bool): whether to include batch normalization
-        conv_first (bool): conv-bn-activation (True) or
-            bn-activation-conv (False)
-
-    # Returns
-        x (tensor): tensor as input to the next layer
-    """
-    conv = Conv2D(num_filters,
-                  kernel_size=kernel_size,
-                  strides=strides,
-                  padding='same',
-                  kernel_initializer='he_normal',
-                  kernel_regularizer=l2(1e-4)) #L2 regularization with penalty 10exp-4
-
-    x = inputs
-    if conv_first:
-        x = conv(x)
-        if batch_normalization:
-            x = BatchNormalization()(x)
-        if activation is not None:
-            x = Activation(activation)(x)
-    else:
-        if batch_normalization:
-            x = BatchNormalization()(x)
-        if activation is not None:
-            x = Activation(activation)(x)
-        x = conv(x)
-    return x
-
-
-
-def resnet_v1(input_shape, depth, num_classes=2):
-    """ResNet Version 1 Model builder [a]
-
-    Stacks of 2 x (3 x 3) Conv2D-BN-ReLU
-    Last ReLU is after the shortcut connection.
-    At the beginning of each stage, the feature map size is halved (downsampled)
-    by a convolutional layer with strides=2, while the number of filters is
-    doubled. Within each stage, the layers have the same number filters and the
-    same number of filters.
-    Features maps sizes: (if 32x32 images and 16 filters)
-    stage 0: 32x32, 16
-    stage 1: 16x16, 32
-    stage 2:  8x8,  64
-    The Number of parameters is approx the same as Table 6 of [a]:
-    ResNet20 0.27M
-    ResNet32 0.46M
-    ResNet44 0.66M
-    ResNet56 0.85M
-    ResNet110 1.7M
-
-    # Arguments
-        input_shape (tensor): shape of input image tensor
-        depth (int): number of core convolutional layers
-        num_classes (int): number of classes 
-
-    # Returns
-        model (Model): Keras model instance
-    """
-    if (depth - 2) % 6 != 0:
-        raise ValueError('depth should be 6n+2 (eg 20, 32, 44 in [a])')
-    # Start model definition.
-    num_filters = 16
-    num_res_blocks = int((depth - 2) / 6)
-
-    inputs = Input(shape=input_shape)
-    x = resnet_layer(inputs=inputs)
-    # Instantiate the stack of residual units
-    for stack in range(3):
-        for res_block in range(num_res_blocks):
-            strides = 1
-            if stack > 0 and res_block == 0:  # first layer but not first stack
-                strides = 2  # downsample
-            y = resnet_layer(inputs=x,
-                             num_filters=num_filters,
-                             strides=strides)
-            y = resnet_layer(inputs=y,
-                             num_filters=num_filters,
-                             activation=None)
-            if stack > 0 and res_block == 0:  # first layer but not first stack
-                # linear projection residual shortcut connection to match
-                # changed dims
-                x = resnet_layer(inputs=x,
-                                 num_filters=num_filters,
-                                 kernel_size=1,
-                                 strides=strides,
-                                 activation=None,
-                                 batch_normalization=False)
-            x = keras.layers.add([x, y])
-            x = Activation('relu')(x)
-        num_filters *= 2
-
-    # Add classifier on top.
-    # v1 does not use BN after last shortcut connection-ReLU
-    x = AveragePooling2D(pool_size=2)(x)
-    y = Flatten()(x)
-    outputs = Dense(num_classes,
-                    activation='softmax',
-                    kernel_initializer='he_normal')(y)
-
-    # Instantiate model.
-    model = Model(inputs=inputs, outputs=outputs)
-    return model
 
 
 #################
@@ -255,10 +138,9 @@ def images_to_arrays(names, directory):
 
     return np.array(data_list)
 
-pdb.set_trace()
-X_train = images_to_arrays(X_train, train_zip)
+X_train = images_to_arrays(X_train[0:100], train_zip)
 X_train = X_train/255 #rescaling by 255 (make pixel intensities into 0 to 1 range)
-X_valid = images_to_arrays(X_valid, train_zip)
+X_valid = images_to_arrays(X_valid[0:100], train_zip)
 X_valid = X_valid/255 #Rescale
 
 #Keras datagenerator, performs augmentation
@@ -274,10 +156,19 @@ datagen = ImageDataGenerator(rotation_range = 90, horizontal_flip = True)
 datagen.fit(X_train)
 
 
-depth = 20 #6n+2, where n is the number of resnet layers
+
 # Input image dimensions.
 input_shape = X_train.shape[1:]
-model = resnet_v1(input_shape=input_shape, depth=depth)
+
+#Load ResNet50 pretrained model
+base_model = ResNet50(include_top=False, weights='imagenet', input_tensor=None, input_shape=(crop_size,crop_size,3))#, pooling='avg')#Stores models and weightsd somewhere after loading first time
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = Flatten()(x)
+predictions = Dense(num_classes, activation='softmax')(x)
+
+model = Model(inputs=base_model.input, outputs=predictions)
 
 model.compile(loss='categorical_crossentropy',
               optimizer='adam',
@@ -286,44 +177,18 @@ model.compile(loss='categorical_crossentropy',
 #Write summary of model
 model.summary()
 
-#lr schedule
-def lr_schedule(epoch):
-    """Learning Rate Schedule
-
-    Learning rate is scheduled to be reduced after 80, 120, 160, 180 epochs.
-    Called automatically every epoch as part of callbacks during training.
-
-    # Arguments
-        epoch (int): The number of epochs
-
-    # Returns
-        lr (float32): learning rate
-    """
-    lr = 1e-3
-    if epoch > ((epochs/10)*9.5):
-        lr *= 0.5e-3
-    elif epoch > ((epochs/10)*9):
-        lr *= 1e-3
-    elif epoch > ((epochs/10)*7):
-        lr *= 1e-2
-    elif epoch > ((epochs/10)*5):
-        lr *= 1e-1
-    print('Learning rate: ', lr)
-    return lr
-
-# lr scheduler
-lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
 
 #Checkpoint
-filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
+filepath="./models/weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
 checkpoint = ModelCheckpoint(filepath, monitor='val_acc', verbose=1, save_best_only=True, mode='max')
 
 
+
 # fits the model on batches with real-time data augmentation:
-model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
+model.fit_generator(datagen.flow(X_train, y_train[0:100], batch_size = batch_size),
               steps_per_epoch=len(X_train) / batch_size,
               epochs=epochs,
-              validation_data=(X_valid, y_valid),
+              validation_data=(X_valid, y_valid[0:100]),
               shuffle=True, #Dont feed continuously
               callbacks=[tensorboard, checkpoint]) #, lr_scheduler])
 
@@ -333,7 +198,7 @@ model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
 from tensorflow.keras.models import model_from_json   
 #serialize model to JSON
 model_json = model.to_json()
-with open("./models/model."+log_name+".json", "w") as json_file:
+with open("./models/resnet50."+log_name+".json", "w") as json_file:
     json_file.write(model_json)
 
 # serialize weights to HDF5

@@ -22,6 +22,7 @@ from tensorflow import keras
 from tensorflow.keras.utils import to_categorical   
 from tensorflow.keras.callbacks import TensorBoard
 import time
+import math
 
 import argparse
 import sys
@@ -97,10 +98,7 @@ split_stats('valid', y_valid)
 y_train = to_categorical(y_train, num_classes=2)
 y_valid = to_categorical(y_valid, num_classes=2)
 
-# Training parameters
-batch_size = 128  # orig paper trained all networks with batch_size=128
-epochs = 100
-num_classes = 2
+
 
 
 
@@ -228,12 +226,20 @@ def resnet_v1(input_shape, depth, num_classes=2):
 #MAIN
 #################
 
-
+#Parameters
 #Crop parameters
 img_size = 96 #Don't change
 crop_size = 48
 start_crop = (img_size - crop_size)//2
 end_crop = start_crop + crop_size
+
+# Training parameters
+batch_size = 64  # orig paper trained all networks with batch_size=128
+epochs = 1
+num_classes = 2
+
+#Opt
+find_lr = True
 
 #Get train and valid data
 
@@ -255,17 +261,18 @@ def images_to_arrays(names, directory):
 
     return np.array(data_list)
 
-pdb.set_trace()
+
 X_train = images_to_arrays(X_train, train_zip)
-X_train = X_train/255 #rescaling by 255 (make pixel intensities into 0 to 1 range)
+X_train = X_train#/255 #rescaling by 255 (make pixel intensities into 0 to 1 range)
 X_valid = images_to_arrays(X_valid, train_zip)
-X_valid = X_valid/255 #Rescale
+X_valid = X_valid#/255 #Rescale
 
 #Keras datagenerator, performs augmentation
 #random rotation by 90 deg
 #random horizontal and vertical flips
 #rescaling by 255 (make pixel intensities into 0 to 1 range)
-datagen = ImageDataGenerator(rotation_range = 90, horizontal_flip = True) 
+datagen = ImageDataGenerator(rotation_range = 90)
+                              # horizontal_flip = True) 
                               #vertical_flip = False)  
                               #zoom_range = 32.0)
                               #brightness_range = [0.0,10.0])
@@ -286,56 +293,66 @@ model.compile(loss='categorical_crossentropy',
 #Write summary of model
 model.summary()
 
-#lr schedule
-def lr_schedule(epoch):
-    """Learning Rate Schedule
-
-    Learning rate is scheduled to be reduced after 80, 120, 160, 180 epochs.
-    Called automatically every epoch as part of callbacks during training.
-
-    # Arguments
-        epoch (int): The number of epochs
-
-    # Returns
-        lr (float32): learning rate
-    """
-    lr = 1e-3
-    if epoch > ((epochs/10)*9.5):
-        lr *= 0.5e-3
-    elif epoch > ((epochs/10)*9):
-        lr *= 1e-3
-    elif epoch > ((epochs/10)*7):
-        lr *= 1e-2
-    elif epoch > ((epochs/10)*5):
-        lr *= 1e-1
-    print('Learning rate: ', lr)
-    return lr
-
-# lr scheduler
-lr_scheduler = LearningRateScheduler(lr_schedule) #Reduces learning rate during training to avoid jumping out of optimal minima
-
 #Checkpoint
 filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
 checkpoint = ModelCheckpoint(filepath, monitor='val_acc', verbose=1, save_best_only=True, mode='max')
 
+#One cycle lr optimization function 
+save_lrate = []
+def one_cycle(epochs):
+  '''Increase lr each batch to find start lr
+  '''
+  step = epochs
+  initial_rate = 0.000001
+  final_rate = 1
+  #steps_per_epoch = len(X_train) / batch_size
+  #interval = steps_per_epoch/100
+  interval = (math.log(final_rate)-math.log(initial_rate))/100
+
+  lrate = math.log(initial_rate)+(interval*step)
+  print(lrate)
+  save_lrate.append(lrate)
+  lrate = math.exp(lrate)
+
+  return lrate
+
+def lr_schedule(epochs):
+  '''lr scheduel according to one-cycle policy.
+  '''
+  lrate = 0.000001
+  return lrate
+
+if find_lr == True:
+  lrate = LearningRateScheduler(one_cycle)
+  callbacks = [lrate]
+  steps_per_epoch = (len(X_train) / batch_size)/100
+  epochs = 100
+  validation_data=(X_valid[0:100], y_valid[0:100])
+else:
+  lrate = LearningRateScheduler(lr_schedule)
+  callbacks=[tensorboard, checkpoint, lrate]
+  steps_per_epoch = (len(X_train) / batch_size)
+  validation_data=(X_valid, y_valid)
 
 # fits the model on batches with real-time data augmentation:
-model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
-              steps_per_epoch=len(X_train) / batch_size,
+history = model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
+              steps_per_epoch=steps_per_epoch,
               epochs=epochs,
-              validation_data=(X_valid, y_valid),
+              validation_data=validation_data,
               shuffle=True, #Dont feed continuously
-              callbacks=[tensorboard, checkpoint]) #, lr_scheduler])
+              callbacks=callbacks) #, lr_scheduler])
 
-
-
+losses = history.history['loss']
+for i in range(0,len(save_lrate)):
+  print(save_lrate[i], losses[i])
+pdb.set_trace()
 #Save model to disk
-from tensorflow.keras.models import model_from_json   
+#from tensorflow.keras.models import model_from_json   
 #serialize model to JSON
-model_json = model.to_json()
-with open("./models/model."+log_name+".json", "w") as json_file:
-    json_file.write(model_json)
+#model_json = model.to_json()
+#with open("./models/model."+log_name+".json", "w") as json_file:
+#    json_file.write(model_json)
 
 # serialize weights to HDF5
 #model.save_weights("./models/model."+log_name+".h5")
-print("Saved model to disk")
+#print("Saved model to disk")

@@ -95,7 +95,7 @@ def write_pred(names, called):
 	if len(called) != len(names):
 		raise ValueError('The number of predictions does not equal the number of ids')
 
-	print('id, label')
+	print('id,label')
 	for i in range(0,len(names)):
 		name = names[i].split('.tif')[0]
 		print(name+','+str(called[i]))

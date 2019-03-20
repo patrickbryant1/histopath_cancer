@@ -234,12 +234,14 @@ start_crop = (img_size - crop_size)//2
 end_crop = start_crop + crop_size
 
 # Training parameters
-batch_size = 64  # orig paper trained all networks with batch_size=128
-epochs = 1
+batch_size = 128  # orig paper trained all networks with batch_size=128
+num_epochs = 20
 num_classes = 2
-
+max_lr = 0.01
+min_lr = max_lr/10
+lr_change = (max_lr-min_lr)/5 #Reduce further lst three epochs
 #Opt
-find_lr = True
+find_lr = False
 
 #Get train and valid data
 
@@ -272,7 +274,7 @@ X_valid = X_valid#/255 #Rescale
 #random horizontal and vertical flips
 #rescaling by 255 (make pixel intensities into 0 to 1 range)
 datagen = ImageDataGenerator(rotation_range = 90)
-                              # horizontal_flip = True) 
+                            #horizontal_flip = True) 
                               #vertical_flip = False)  
                               #zoom_range = 32.0)
                               #brightness_range = [0.0,10.0])
@@ -319,14 +321,27 @@ def one_cycle(epochs):
 def lr_schedule(epochs):
   '''lr scheduel according to one-cycle policy.
   '''
-  lrate = 0.000001
+  
+  #Increase lrate in beginning
+  if epochs == 0:
+    lrate = min_lr
+  elif (epochs <6 and epochs > 0):
+    lrate = min_lr+(epochs*lr_change)
+  #Decrease further below min_lr last three epochs
+  elif epochs > 10:
+    lrate = min_lr/(10*(epochs-10))
+  #After the max lrate is reached, decrease it back to the min
+  else:
+    lrate = max_lr-((epochs-5)*lr_change)
+
+  print(epochs,lrate)
   return lrate
 
 if find_lr == True:
   lrate = LearningRateScheduler(one_cycle)
   callbacks = [lrate]
   steps_per_epoch = (len(X_train) / batch_size)/100
-  epochs = 100
+  num_epochs = 100
   validation_data=(X_valid[0:100], y_valid[0:100])
 else:
   lrate = LearningRateScheduler(lr_schedule)
@@ -337,22 +352,25 @@ else:
 # fits the model on batches with real-time data augmentation:
 history = model.fit_generator(datagen.flow(X_train, y_train, batch_size = batch_size),
               steps_per_epoch=steps_per_epoch,
-              epochs=epochs,
+              epochs=num_epochs,
               validation_data=validation_data,
               shuffle=True, #Dont feed continuously
               callbacks=callbacks) #, lr_scheduler])
 
-losses = history.history['loss']
-for i in range(0,len(save_lrate)):
-  print(save_lrate[i], losses[i])
-pdb.set_trace()
+#Print lr and loss
+if find_lr == True:
+  losses = history.history['loss']
+  for i in range(0,len(save_lrate)):
+    print(save_lrate[i], losses[i])
+
+if find_lr == False:
 #Save model to disk
 #from tensorflow.keras.models import model_from_json   
 #serialize model to JSON
-#model_json = model.to_json()
-#with open("./models/model."+log_name+".json", "w") as json_file:
-#    json_file.write(model_json)
+  model_json = model.to_json()
+  with open("./models/model."+log_name+".json", "w") as json_file:
+    json_file.write(model_json)
 
 # serialize weights to HDF5
-#model.save_weights("./models/model."+log_name+".h5")
-#print("Saved model to disk")
+  model.save_weights("./models/model."+log_name+".h5")
+  print("Saved model to disk")
